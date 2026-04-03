@@ -96,6 +96,57 @@ pub fn router() -> Router {
     )
 }
 
+/// Direct image generation call -- same logic as run_image_gen but without TangleArg.
+/// Used for testing without the Tangle context.
+pub async fn generate_image_direct(request: &ImageGenRequest) -> Result<ImageGenResult, RunnerError> {
+    let endpoint = DIFFUSION_ENDPOINT.get().ok_or_else(|| {
+        RunnerError::Other("diffusion endpoint not registered".into())
+    })?;
+
+    let steps = if request.steps == 0 {
+        endpoint.default_steps
+    } else {
+        request.steps
+    };
+
+    let body = serde_json::json!({
+        "prompt": request.prompt,
+        "model": endpoint.model,
+        "width": request.width,
+        "height": request.height,
+        "steps": steps,
+        "n": request.numImages.max(1),
+        "cfg_scale": 7.5,
+    });
+
+    let resp = endpoint
+        .client
+        .post(&endpoint.url)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| RunnerError::Other(format!("diffusion request failed: {e}").into()))?;
+
+    let result: serde_json::Value = resp.json().await
+        .map_err(|e| RunnerError::Other(format!("diffusion response parse failed: {e}").into()))?;
+
+    let image_uri = result["image_uri"]
+        .as_str()
+        .unwrap_or("pending")
+        .to_string();
+    let num_images = result["images"]
+        .as_array()
+        .map(|a| a.len() as u32)
+        .unwrap_or(request.numImages.max(1));
+
+    Ok(ImageGenResult {
+        imageUri: image_uri,
+        numImages: num_images,
+        widthUsed: request.width,
+        heightUsed: request.height,
+    })
+}
+
 // --- Job handler ---
 
 /// Handle an image generation job submitted on-chain.
