@@ -5,8 +5,8 @@
 //! The operator does NOT run diffusion inference itself -- it proxies to
 //! a configurable HTTP endpoint.
 
-use blueprint_std::sync::Arc;
-use blueprint_std::time::Duration;
+use blueprint_sdk::std::sync::Arc;
+use blueprint_sdk::std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
