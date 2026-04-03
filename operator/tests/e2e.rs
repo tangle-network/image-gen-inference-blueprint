@@ -1,114 +1,255 @@
-use image_gen_inference::diffusion::{
-    EditParams, GenerateParams, GenerateResult, GeneratedImage, VariationParams,
+use std::sync::Arc;
+
+use wiremock::{
+    matchers::{method, path},
+    Mock, MockServer, ResponseTemplate,
 };
 
-#[test]
-fn generate_params_serialization_roundtrip() {
-    let params = GenerateParams {
-        prompt: "a cat in space".to_string(),
-        negative_prompt: Some("blurry, low quality".to_string()),
-        model: Some("stable-diffusion-xl".to_string()),
-        width: 1024,
-        height: 1024,
-        steps: 30,
-        n: 2,
-        seed: Some(42),
-        cfg_scale: 7.5,
+use image_gen_inference::config::{
+    BillingConfig, DiffusionConfig, GpuConfig, OperatorConfig, ServerConfig, TangleConfig,
+};
+use image_gen_inference::diffusion::DiffusionBackend;
+
+fn free_port() -> u16 {
+    std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port()
+}
+
+fn test_config(diffusion_port: u16) -> OperatorConfig {
+    OperatorConfig {
+        tangle: TangleConfig {
+            rpc_url: "http://localhost:8545".into(),
+            chain_id: 31337,
+            operator_key: "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+                .into(),
+            tangle_core: "0x0000000000000000000000000000000000000000".into(),
+            shielded_credits: "0x0000000000000000000000000000000000000000".into(),
+            blueprint_id: 1,
+            service_id: Some(1),
+        },
+        diffusion: DiffusionConfig {
+            model: "test-model".into(),
+            endpoint: format!("http://127.0.0.1:{diffusion_port}"),
+            default_steps: 10,
+            default_width: 1024,
+            default_height: 1024,
+            supported_resolutions: vec![
+                "512x512".into(),
+                "1024x1024".into(),
+            ],
+            generation_timeout_secs: 30,
+            max_images: 4,
+            supported_operations: vec![
+                "generate".into(),
+                "edit".into(),
+                "variation".into(),
+            ],
+            max_image_size_bytes: 20 * 1024 * 1024,
+        },
+        server: ServerConfig {
+            host: "127.0.0.1".into(),
+            port: 0, // overridden per-test
+            max_concurrent_requests: 8,
+            max_request_body_bytes: 32 * 1024 * 1024,
+            request_timeout_secs: 30,
+            max_per_account_requests: 0,
+        },
+        billing: BillingConfig {
+            required: false,
+            price_per_image: 50000,
+            price_per_extra_megapixel: 0,
+            max_spend_per_request: 1_000_000,
+            min_credit_balance: 1000,
+            billing_required: false,
+            min_charge_amount: 0,
+            claim_max_retries: 3,
+            clock_skew_tolerance_secs: 30,
+            max_gas_price_gwei: 0,
+            nonce_store_path: None,
+            payment_token_address: None,
+        },
+        gpu: GpuConfig {
+            expected_gpu_count: 0,
+            min_vram_mib: 0,
+            gpu_model: None,
+            monitor_interval_secs: 30,
+        },
+        qos: None,
+    }
+}
+
+async fn start_test_server(
+    diffusion_port: u16,
+) -> (u16, tokio::sync::watch::Sender<bool>, tokio::task::JoinHandle<()>) {
+    let server_port = free_port();
+    let mut config = test_config(diffusion_port);
+    config.server.port = server_port;
+    let config = Arc::new(config);
+
+    let backend = Arc::new(DiffusionBackend::new(config.clone()).unwrap());
+
+    let state = image_gen_inference::server::AppState {
+        config,
+        backend,
     };
 
-    let json = serde_json::to_string(&params).unwrap();
-    let deserialized: GenerateParams = serde_json::from_str(&json).unwrap();
-
-    assert_eq!(deserialized.prompt, "a cat in space");
-    assert_eq!(deserialized.negative_prompt.as_deref(), Some("blurry, low quality"));
-    assert_eq!(deserialized.width, 1024);
-    assert_eq!(deserialized.height, 1024);
-    assert_eq!(deserialized.steps, 30);
-    assert_eq!(deserialized.n, 2);
-    assert_eq!(deserialized.seed, Some(42));
-    assert!((deserialized.cfg_scale - 7.5).abs() < f32::EPSILON);
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+    let handle = image_gen_inference::server::start(state, shutdown_rx)
+        .await
+        .unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    (server_port, shutdown_tx, handle)
 }
 
-#[test]
-fn generate_params_defaults() {
-    let json = r#"{"prompt":"test","width":512,"height":512,"steps":20}"#;
-    let params: GenerateParams = serde_json::from_str(json).unwrap();
+// -- Tests --
 
-    assert_eq!(params.n, 1); // default_n
-    assert!((params.cfg_scale - 7.5).abs() < f32::EPSILON); // default_cfg_scale
-    assert!(params.negative_prompt.is_none());
-    assert!(params.model.is_none());
-    assert!(params.seed.is_none());
+#[tokio::test]
+async fn test_health_check_healthy_backend() {
+    let mock_backend = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/health"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"status": "ok"})))
+        .mount(&mock_backend)
+        .await;
+
+    let (port, _tx, _h) = start_test_server(mock_backend.address().port()).await;
+
+    let resp = reqwest::get(format!("http://127.0.0.1:{port}/health"))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["status"], "ok");
+    assert_eq!(body["model"], "test-model");
 }
 
-#[test]
-fn edit_params_serialization() {
-    let params = EditParams {
-        prompt: "make it red".to_string(),
-        negative_prompt: None,
-        model: None,
-        n: 1,
-        size: Some("1024x1024".to_string()),
-        seed: None,
-        cfg_scale: 7.5,
-    };
+#[tokio::test]
+async fn test_health_check_unhealthy_backend() {
+    let mock_backend = MockServer::start().await;
+    // no health mock -> 404 from wiremock = unhealthy
 
-    let json = serde_json::to_string(&params).unwrap();
-    let deserialized: EditParams = serde_json::from_str(&json).unwrap();
+    let (port, _tx, _h) = start_test_server(mock_backend.address().port()).await;
 
-    assert_eq!(deserialized.prompt, "make it red");
-    assert_eq!(deserialized.size.as_deref(), Some("1024x1024"));
+    let resp = reqwest::get(format!("http://127.0.0.1:{port}/health"))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 503);
 }
 
-#[test]
-fn variation_params_serialization() {
-    let params = VariationParams {
-        model: Some("sdxl".to_string()),
-        n: 3,
-        size: None,
-        seed: Some(123),
-    };
+#[tokio::test]
+async fn test_create_image_success() {
+    let mock_backend = MockServer::start().await;
 
-    let json = serde_json::to_string(&params).unwrap();
-    let deserialized: VariationParams = serde_json::from_str(&json).unwrap();
+    Mock::given(method("GET"))
+        .and(path("/health"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"status": "ok"})))
+        .mount(&mock_backend)
+        .await;
 
-    assert_eq!(deserialized.model.as_deref(), Some("sdxl"));
-    assert_eq!(deserialized.n, 3);
-    assert_eq!(deserialized.seed, Some(123));
+    Mock::given(method("POST"))
+        .and(path("/generate"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "images": [{"b64_json": "dGVzdA==", "revised_prompt": null}],
+            "generation_time_ms": 1234
+        })))
+        .mount(&mock_backend)
+        .await;
+
+    let (port, _tx, _h) = start_test_server(mock_backend.address().port()).await;
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("http://127.0.0.1:{port}/v1/images/generations"))
+        .json(&serde_json::json!({
+            "prompt": "a cat",
+            "size": "1024x1024",
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert!(body["created"].as_u64().is_some());
+    assert_eq!(body["data"].as_array().unwrap().len(), 1);
+    assert!(body["data"][0]["b64_json"].as_str().is_some());
 }
 
-#[test]
-fn generate_result_deserialization() {
-    let json = r#"{
-        "images": [
-            {"b64_json": "aW1hZ2VfZGF0YQ==", "revised_prompt": "a cat floating in outer space"},
-            {"b64_json": "c2Vjb25kX2ltYWdl", "revised_prompt": null}
-        ],
-        "generation_time_ms": 5432
-    }"#;
+#[tokio::test]
+async fn test_create_image_invalid_size() {
+    let mock_backend = MockServer::start().await;
 
-    let result: GenerateResult = serde_json::from_str(json).unwrap();
+    let (port, _tx, _h) = start_test_server(mock_backend.address().port()).await;
 
-    assert_eq!(result.images.len(), 2);
-    assert_eq!(result.images[0].b64_json, "aW1hZ2VfZGF0YQ==");
-    assert_eq!(
-        result.images[0].revised_prompt.as_deref(),
-        Some("a cat floating in outer space")
-    );
-    assert!(result.images[1].revised_prompt.is_none());
-    assert_eq!(result.generation_time_ms, Some(5432));
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("http://127.0.0.1:{port}/v1/images/generations"))
+        .json(&serde_json::json!({
+            "prompt": "a cat",
+            "size": "9999x9999",
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 400);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert!(body["error"]["message"].as_str().unwrap().contains("unsupported resolution"));
 }
 
-#[test]
-fn generated_image_minimal() {
-    let img = GeneratedImage {
-        b64_json: "dGVzdA==".to_string(),
-        revised_prompt: None,
-    };
+#[tokio::test]
+async fn test_edit_image_success() {
+    let mock_backend = MockServer::start().await;
 
-    let json = serde_json::to_string(&img).unwrap();
-    assert!(json.contains("dGVzdA=="));
+    Mock::given(method("GET"))
+        .and(path("/health"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"status": "ok"})))
+        .mount(&mock_backend)
+        .await;
 
-    let deserialized: GeneratedImage = serde_json::from_str(&json).unwrap();
-    assert_eq!(deserialized.b64_json, "dGVzdA==");
+    Mock::given(method("POST"))
+        .and(path("/edit"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "images": [{"b64_json": "ZWRpdGVk", "revised_prompt": null}],
+            "generation_time_ms": 2000
+        })))
+        .mount(&mock_backend)
+        .await;
+
+    let (port, _tx, _h) = start_test_server(mock_backend.address().port()).await;
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("http://127.0.0.1:{port}/v1/images/edits"))
+        .json(&serde_json::json!({
+            "image": "dGVzdA==",
+            "prompt": "make it blue",
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["data"].as_array().unwrap().len(), 1);
+    assert!(body["data"][0]["b64_json"].as_str().is_some());
+}
+
+#[tokio::test]
+async fn test_list_models() {
+    let mock_backend = MockServer::start().await;
+
+    let (port, _tx, _h) = start_test_server(mock_backend.address().port()).await;
+
+    let resp = reqwest::get(format!("http://127.0.0.1:{port}/v1/models"))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["object"], "list");
+    assert_eq!(body["data"][0]["id"], "test-model");
 }
