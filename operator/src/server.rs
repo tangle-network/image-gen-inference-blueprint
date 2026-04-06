@@ -14,25 +14,24 @@ use blueprint_sdk::std::sync::Arc;
 use blueprint_sdk::std::time::Duration;
 
 use axum::{
-    body::Body,
     extract::{DefaultBodyLimit, State},
-    http::{header, HeaderMap, StatusCode},
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router as HttpRouter,
 };
 use serde::{Deserialize, Serialize};
-use tokio::sync::OwnedSemaphorePermit;
 use tokio::task::JoinHandle;
 use tower_http::cors::CorsLayer;
 use tower_http::timeout::TimeoutLayer;
 use tower_http::trace::TraceLayer;
 
 use tangle_inference_core::server::{
-    error_response, extract_x402_spend_auth, payment_required, settle_billing, validate_spend_auth,
+    acquire_permit, billing_gate, error_response, gpu_health_handler, metrics_handler,
+    settle_billing,
 };
 use tangle_inference_core::{
-    detect_gpus, AppState, CostModel, CostParams, GpuInfo, PerImageCostModel, RequestGuard,
+    detect_gpus, AppState, CostModel, CostParams, PerImageCostModel, RequestGuard,
     SpendAuthPayload,
 };
 
@@ -98,7 +97,7 @@ pub async fn start(
         .route("/v1/models", get(list_models))
         .route("/v1/operator", get(operator_info))
         .route("/health", get(health_check))
-        .route("/health/gpu", get(gpu_health))
+        .route("/health/gpu", get(gpu_health_handler))
         .route("/metrics", get(metrics_handler))
         .layer(DefaultBodyLimit::max(max_body))
         .layer(TimeoutLayer::new(request_timeout))
@@ -309,112 +308,6 @@ fn validate_image_size(backend: &ImageGenBackend, b64: &str) -> Option<Response>
     }
 }
 
-/// Extract x402 SpendAuth from body or headers; enforce billing; validate;
-/// authorize on-chain; record nonce. On success returns the (optional)
-/// authorized SpendAuth + preauth amount. On failure returns a ready response.
-async fn authorize_request(
-    state: &AppState,
-    headers: &HeaderMap,
-    spend_auth: &mut Option<SpendAuthPayload>,
-    estimated_cost: u64,
-) -> Result<Option<(SpendAuthPayload, u64)>, Response> {
-    let backend = backend_from(state);
-
-    // Fallback to x402 header if body didn't carry one.
-    if spend_auth.is_none() {
-        if let Some(auth) = extract_x402_spend_auth(headers) {
-            *spend_auth = Some(auth);
-        }
-    }
-
-    // Enforce billing requirement — return 402 if missing.
-    if state.billing_config.billing_required && spend_auth.is_none() {
-        return Err(payment_required(
-            &state.billing_config,
-            &state.tangle_config,
-            state.operator_address,
-            estimated_cost,
-        ));
-    }
-
-    let Some(auth) = spend_auth.clone() else {
-        return Ok(None);
-    };
-
-    // Validate (nonce replay, signer, balance, expiry, operator/service match).
-    let preauth_amount = match validate_spend_auth(state, &auth).await {
-        Ok(amt) => amt,
-        Err(resp) => return Err(resp),
-    };
-
-    // Cost sanity: pre-auth must not exceed 1.5x estimated cost.
-    let ceiling = estimated_cost.saturating_mul(3) / 2;
-    if estimated_cost > 0 && preauth_amount > ceiling {
-        return Err(error_response(
-            StatusCode::BAD_REQUEST,
-            format!(
-                "pre-auth amount ({preauth_amount}) exceeds 1.5x estimated cost ({estimated_cost}) — \
-                 contract settles full pre-auth, reduce amount to avoid overcharging"
-            ),
-            "billing_error",
-            "excessive_preauth",
-        ));
-    }
-
-    // Per-account concurrency limit.
-    let max_per_account = state.server_config.max_per_account_requests;
-    if max_per_account > 0 {
-        let mut map = state.active_per_account.write().await;
-        let count = map.entry(auth.commitment.clone()).or_insert(0);
-        if *count >= max_per_account {
-            return Err(error_response(
-                StatusCode::TOO_MANY_REQUESTS,
-                format!("account has {count} active requests (limit: {max_per_account})"),
-                "rate_limit_error",
-                "per_account_limit",
-            ));
-        }
-        *count += 1;
-    }
-
-    // Check backend health before committing gas.
-    if !backend.diffusion.is_healthy().await {
-        return Err(error_response(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "diffusion backend is unavailable — billing not initiated".to_string(),
-            "upstream_error",
-            "backend_unhealthy",
-        ));
-    }
-
-    // Authorize on-chain.
-    if let Err(e) = state.billing.authorize_spend(&auth).await {
-        tracing::error!(error = %e, "authorizeSpend failed");
-        return Err(error_response(
-            StatusCode::PAYMENT_REQUIRED,
-            format!("billing authorization failed: {e}"),
-            "billing_error",
-            "authorization_failed",
-        ));
-    }
-
-    // Nonce is recorded inside validate_spend_auth — no separate insert needed.
-
-    Ok(Some((auth, preauth_amount)))
-}
-
-#[allow(clippy::result_large_err)]
-fn acquire_permit(state: &AppState) -> Result<OwnedSemaphorePermit, Response> {
-    state.semaphore.clone().try_acquire_owned().map_err(|_| {
-        error_response(
-            StatusCode::TOO_MANY_REQUESTS,
-            "server at capacity".to_string(),
-            "rate_limit_error",
-            "too_many_requests",
-        )
-    })
-}
-
 // --- Handlers ---
 
 async fn create_image(
@@ -431,7 +324,7 @@ async fn create_image(
         Err(resp) => return resp,
     };
 
-    // 1. Parse/validate size.
+    // Parse/validate size.
     let (width, height) = match parse_size(&req.size) {
         Some(dims) => dims,
         None => {
@@ -465,7 +358,7 @@ async fn create_image(
         );
     }
 
-    // 2. Clamp n and resolve steps.
+    // Clamp n and resolve steps.
     let n = req.n.clamp(1, backend.config.diffusion.max_images);
     let steps = req.steps.unwrap_or(if req.quality == "hd" {
         backend.config.diffusion.default_steps * 2
@@ -473,14 +366,25 @@ async fn create_image(
         backend.config.diffusion.default_steps
     });
 
-    // 3. Billing: estimate cost and run the x402 authorize flow.
+    // Billing gate: extract x402 -> validate -> authorize on-chain.
     let estimated_cost = backend.calculate_cost(n);
-    let authorized = match authorize_request(&state, &headers, &mut req.spend_auth, estimated_cost).await {
-        Ok(a) => a,
-        Err(resp) => return resp,
-    };
+    let (spend_auth, preauth) =
+        match billing_gate(&state, &headers, req.spend_auth.take(), estimated_cost).await {
+            Ok(v) => v,
+            Err(resp) => return resp,
+        };
 
-    // 4. Generate.
+    // Check backend health before serving (only when billing).
+    if spend_auth.is_some() && !backend.diffusion.is_healthy().await {
+        return error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "diffusion backend is unavailable — billing not initiated".to_string(),
+            "upstream_error",
+            "backend_unhealthy",
+        );
+    }
+
+    // Generate.
     let params = GenerateParams {
         prompt: req.prompt,
         negative_prompt: req.negative_prompt,
@@ -509,10 +413,10 @@ async fn create_image(
     let n_actual = result.images.len() as u32;
     metrics_guard.set_success();
 
-    // 5. Settle billing.
-    if let Some((ref spend_auth, preauth)) = authorized {
+    // Settle billing.
+    if let Some(ref auth) = spend_auth {
         let actual_cost = backend.calculate_cost(n_actual);
-        if let Err(e) = settle_billing(&state.billing, spend_auth, preauth, actual_cost).await {
+        if let Err(e) = settle_billing(&state.billing, auth, preauth.unwrap_or(0), actual_cost).await {
             tracing::error!(error = %e, "on-chain settlement failed — manual recovery required");
         }
     }
@@ -550,10 +454,20 @@ async fn edit_image(
     let n = req.n.clamp(1, backend.config.diffusion.max_images);
 
     let estimated_cost = backend.calculate_cost(n);
-    let authorized = match authorize_request(&state, &headers, &mut req.spend_auth, estimated_cost).await {
-        Ok(a) => a,
-        Err(resp) => return resp,
-    };
+    let (spend_auth, preauth) =
+        match billing_gate(&state, &headers, req.spend_auth.take(), estimated_cost).await {
+            Ok(v) => v,
+            Err(resp) => return resp,
+        };
+
+    if spend_auth.is_some() && !backend.diffusion.is_healthy().await {
+        return error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "diffusion backend is unavailable — billing not initiated".to_string(),
+            "upstream_error",
+            "backend_unhealthy",
+        );
+    }
 
     let params = EditParams {
         prompt: req.prompt.clone(),
@@ -585,9 +499,9 @@ async fn edit_image(
     let n_actual = result.images.len() as u32;
     metrics_guard.set_success();
 
-    if let Some((ref spend_auth, preauth)) = authorized {
+    if let Some(ref auth) = spend_auth {
         let actual_cost = backend.calculate_cost(n_actual);
-        if let Err(e) = settle_billing(&state.billing, spend_auth, preauth, actual_cost).await {
+        if let Err(e) = settle_billing(&state.billing, auth, preauth.unwrap_or(0), actual_cost).await {
             tracing::error!(error = %e, "on-chain settlement failed — manual recovery required");
         }
     }
@@ -620,10 +534,20 @@ async fn create_variation(
     let n = req.n.clamp(1, backend.config.diffusion.max_images);
 
     let estimated_cost = backend.calculate_cost(n);
-    let authorized = match authorize_request(&state, &headers, &mut req.spend_auth, estimated_cost).await {
-        Ok(a) => a,
-        Err(resp) => return resp,
-    };
+    let (spend_auth, preauth) =
+        match billing_gate(&state, &headers, req.spend_auth.take(), estimated_cost).await {
+            Ok(v) => v,
+            Err(resp) => return resp,
+        };
+
+    if spend_auth.is_some() && !backend.diffusion.is_healthy().await {
+        return error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "diffusion backend is unavailable — billing not initiated".to_string(),
+            "upstream_error",
+            "backend_unhealthy",
+        );
+    }
 
     let params = VariationParams {
         model: req.model,
@@ -648,9 +572,9 @@ async fn create_variation(
     let n_actual = result.images.len() as u32;
     metrics_guard.set_success();
 
-    if let Some((ref spend_auth, preauth)) = authorized {
+    if let Some(ref auth) = spend_auth {
         let actual_cost = backend.calculate_cost(n_actual);
-        if let Err(e) = settle_billing(&state.billing, spend_auth, preauth, actual_cost).await {
+        if let Err(e) = settle_billing(&state.billing, auth, preauth.unwrap_or(0), actual_cost).await {
             tracing::error!(error = %e, "on-chain settlement failed — manual recovery required");
         }
     }
@@ -715,30 +639,4 @@ async fn health_check(
     } else {
         Err(StatusCode::SERVICE_UNAVAILABLE)
     }
-}
-
-async fn gpu_health() -> Result<Json<Vec<GpuInfo>>, (StatusCode, String)> {
-    match detect_gpus().await {
-        Ok(gpus) => Ok(Json(gpus)),
-        Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
-    }
-}
-
-async fn metrics_handler() -> Response {
-    let body = tangle_inference_core::metrics::gather();
-    Response::builder()
-        .status(StatusCode::OK)
-        .header(
-            header::CONTENT_TYPE,
-            "text/plain; version=0.0.4; charset=utf-8",
-        )
-        .body(Body::from(body))
-        .unwrap_or_else(|e| {
-            error_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("failed to build metrics response: {e}"),
-                "internal_error",
-                "response_build_failed",
-            )
-        })
 }
