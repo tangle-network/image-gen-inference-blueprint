@@ -1,3 +1,9 @@
+//! End-to-end HTTP server tests.
+//!
+//! Boots the real axum server wired through the shared `AppStateBuilder`, with
+//! a wiremock-backed diffusion backend. Billing is disabled in these tests; see
+//! the `tangle-inference-core` integration tests for billing coverage.
+
 use std::sync::Arc;
 
 use wiremock::{
@@ -6,9 +12,11 @@ use wiremock::{
 };
 
 use image_gen_inference::config::{
-    BillingConfig, DiffusionConfig, GpuConfig, OperatorConfig, ServerConfig, TangleConfig,
+    BillingConfig, GpuConfig, ImageGenConfig, OperatorConfig, ServerConfig, TangleConfig,
 };
 use image_gen_inference::diffusion::DiffusionBackend;
+use image_gen_inference::server::ImageGenBackend;
+use image_gen_inference::{AppStateBuilder, BillingClient, NonceStore};
 
 fn free_port() -> u16 {
     std::net::TcpListener::bind("127.0.0.1:0")
@@ -25,45 +33,37 @@ fn test_config(diffusion_port: u16) -> OperatorConfig {
             chain_id: 31337,
             operator_key: "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
                 .into(),
-            tangle_core: "0x0000000000000000000000000000000000000000".into(),
             shielded_credits: "0x0000000000000000000000000000000000000000".into(),
             blueprint_id: 1,
             service_id: Some(1),
         },
-        diffusion: DiffusionConfig {
+        diffusion: ImageGenConfig {
             model: "test-model".into(),
             endpoint: format!("http://127.0.0.1:{diffusion_port}"),
             default_steps: 10,
             default_width: 1024,
             default_height: 1024,
-            supported_resolutions: vec![
-                "512x512".into(),
-                "1024x1024".into(),
-            ],
+            supported_resolutions: vec!["512x512".into(), "1024x1024".into()],
             generation_timeout_secs: 30,
             max_images: 4,
-            supported_operations: vec![
-                "generate".into(),
-                "edit".into(),
-                "variation".into(),
-            ],
+            supported_operations: vec!["generate".into(), "edit".into(), "variation".into()],
             max_image_size_bytes: 20 * 1024 * 1024,
+            price_per_image: 50_000,
         },
         server: ServerConfig {
             host: "127.0.0.1".into(),
             port: 0, // overridden per-test
             max_concurrent_requests: 8,
             max_request_body_bytes: 32 * 1024 * 1024,
-            request_timeout_secs: 30,
+            stream_timeout_secs: 30,
+            idle_chunk_timeout_secs: 30,
+            max_line_buf_bytes: 1024 * 1024,
             max_per_account_requests: 0,
         },
         billing: BillingConfig {
-            required: false,
-            price_per_image: 50000,
-            price_per_extra_megapixel: 0,
+            billing_required: false,
             max_spend_per_request: 1_000_000,
             min_credit_balance: 1000,
-            billing_required: false,
             min_charge_amount: 0,
             claim_max_retries: 3,
             clock_skew_tolerance_secs: 30,
@@ -81,6 +81,25 @@ fn test_config(diffusion_port: u16) -> OperatorConfig {
     }
 }
 
+async fn build_test_state(config: Arc<OperatorConfig>) -> image_gen_inference::AppState {
+    let diffusion = Arc::new(DiffusionBackend::new(config.clone()).unwrap());
+    let billing = Arc::new(BillingClient::new(&config.tangle, &config.billing).unwrap());
+    let operator_address = billing.operator_address();
+    let nonce_store = Arc::new(NonceStore::load(None));
+    let backend = ImageGenBackend::new(config.clone(), diffusion);
+
+    AppStateBuilder::new()
+        .billing(billing)
+        .nonce_store(nonce_store)
+        .server_config(Arc::new(config.server.clone()))
+        .billing_config(Arc::new(config.billing.clone()))
+        .tangle_config(Arc::new(config.tangle.clone()))
+        .operator_address(operator_address)
+        .backend(backend)
+        .build()
+        .unwrap()
+}
+
 async fn start_test_server(
     diffusion_port: u16,
 ) -> (u16, tokio::sync::watch::Sender<bool>, tokio::task::JoinHandle<()>) {
@@ -89,12 +108,7 @@ async fn start_test_server(
     config.server.port = server_port;
     let config = Arc::new(config);
 
-    let backend = Arc::new(DiffusionBackend::new(config.clone()).unwrap());
-
-    let state = image_gen_inference::server::AppState {
-        config,
-        backend,
-    };
+    let state = build_test_state(config).await;
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
     let handle = image_gen_inference::server::start(state, shutdown_rx)
@@ -198,7 +212,10 @@ async fn test_create_image_invalid_size() {
 
     assert_eq!(resp.status(), 400);
     let body: serde_json::Value = resp.json().await.unwrap();
-    assert!(body["error"]["message"].as_str().unwrap().contains("unsupported resolution"));
+    assert!(body["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("unsupported resolution"));
 }
 
 #[tokio::test]
@@ -252,4 +269,54 @@ async fn test_list_models() {
     let body: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(body["object"], "list");
     assert_eq!(body["data"][0]["id"], "test-model");
+}
+
+#[tokio::test]
+async fn test_missing_spend_auth_returns_402_when_billing_required() {
+    let mock_backend = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/health"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"status": "ok"})))
+        .mount(&mock_backend)
+        .await;
+
+    // Build with billing_required = true.
+    let server_port = free_port();
+    let mut config = test_config(mock_backend.address().port());
+    config.server.port = server_port;
+    config.billing.billing_required = true;
+    let config = Arc::new(config);
+    let state = build_test_state(config).await;
+    let (_shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+    let _handle = image_gen_inference::server::start(state, shutdown_rx)
+        .await
+        .unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("http://127.0.0.1:{server_port}/v1/images/generations"))
+        .json(&serde_json::json!({
+            "prompt": "a cat",
+            "size": "1024x1024",
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 402);
+    assert!(resp.headers().contains_key("x-payment-required"));
+}
+
+#[tokio::test]
+async fn test_pricing_per_image() {
+    // Verify PerImageCostModel arithmetic via ImageGenBackend.
+    let mock_backend = MockServer::start().await;
+    let config = Arc::new(test_config(mock_backend.address().port()));
+    let diffusion = Arc::new(DiffusionBackend::new(config.clone()).unwrap());
+    let backend = ImageGenBackend::new(config, diffusion);
+
+    assert_eq!(backend.calculate_cost(1), 50_000);
+    assert_eq!(backend.calculate_cost(4), 200_000);
 }

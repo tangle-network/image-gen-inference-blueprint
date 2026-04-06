@@ -8,7 +8,7 @@ use blueprint_sdk::runner::BlueprintRunner;
 use blueprint_sdk::tangle::{TangleConsumer, TangleProducer};
 
 use image_gen_inference::config::OperatorConfig;
-use image_gen_inference::health;
+use image_gen_inference::detect_gpus;
 use image_gen_inference::ImageGenServer;
 
 fn setup_log() {
@@ -18,7 +18,8 @@ fn setup_log() {
 }
 
 /// Build ABI-encoded registration payload for ImageGenBSM.onRegister.
-/// Format: abi.encode(string model, uint32 gpuCount, uint32 totalVramMib, string gpuModel, string endpoint, string[] supportedResolutions)
+/// Format: abi.encode(string model, uint32 gpuCount, uint32 totalVramMib,
+///                    string gpuModel, string endpoint, string[] supportedResolutions)
 fn registration_payload(config: &OperatorConfig) -> Vec<u8> {
     let gpu_count = config.gpu.expected_gpu_count;
     let total_vram = config.gpu.min_vram_mib;
@@ -52,7 +53,7 @@ async fn main() -> Result<(), blueprint_sdk::Error> {
 
     let env = BlueprintEnvironment::load()?;
 
-    // Registration mode: emit registration inputs and exit
+    // Registration mode: emit registration inputs and exit.
     if env.registration_mode() {
         let payload = registration_payload(&config);
         let output_path = env.registration_output_path();
@@ -70,8 +71,7 @@ async fn main() -> Result<(), blueprint_sdk::Error> {
         return Ok(());
     }
 
-    // Check GPU availability (non-fatal)
-    match health::detect_gpus().await {
+    match detect_gpus().await {
         Ok(gpus) => {
             tracing::info!(count = gpus.len(), "detected GPUs");
             for gpu in &gpus {
@@ -98,7 +98,6 @@ async fn main() -> Result<(), blueprint_sdk::Error> {
     let tangle_producer = TangleProducer::new(tangle_client.clone(), service_id);
     let tangle_consumer = TangleConsumer::new(tangle_client.clone());
 
-    // QoS heartbeat
     let qos_enabled = config
         .qos
         .as_ref()
@@ -118,7 +117,6 @@ async fn main() -> Result<(), blueprint_sdk::Error> {
         tracing::info!("QoS heartbeat disabled");
     }
 
-    // Background service: diffusion health monitor + HTTP server
     let image_gen_server = ImageGenServer {
         config: config.clone(),
     };

@@ -5282,6 +5282,7 @@ dependencies = [
  "anyhow",
  "axum 0.7.9",
  "base64 0.22.1",
+ "blueprint-anvil-testing-utils",
  "blueprint-sdk",
  "config",
  "dotenvy",
@@ -5291,6 +5292,7 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "tangle-inference-core",
  "thiserror 2.0.18",
  "tokio",
  "tower-http 0.5.2",
@@ -8963,6 +8965,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "tangle-inference-core"
+version = "0.1.0"
+source = "git+https://github.com/tangle-network/tangle-inference-core?branch=master#b88d1302870a1e4e1a4e636f26b20bf97d03dfa6"
+dependencies = [
+ "alloy",
+ "anyhow",
+ "axum 0.7.9",
+ "hex",
+ "k256",
+ "prometheus 0.13.4",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tower-http 0.6.8",
+ "tracing",
+]
+
+[[package]]
 name = "tap"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9460,8 +9481,10 @@ dependencies = [
  "futures-util",
  "http 1.4.0",
  "http-body 1.0.1",
+ "http-body-util",
  "iri-string",
  "pin-project-lite",
+ "tokio",
  "tower",
  "tower-layer",
  "tower-service",

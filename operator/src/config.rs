@@ -1,85 +1,44 @@
+//! Image-generation-specific operator configuration.
+//!
+//! Shared infrastructure config (`TangleConfig`, `ServerConfig`, `BillingConfig`,
+//! `GpuConfig`) lives in `tangle-inference-core` and is re-exported here for
+//! convenience.
+
 use serde::{Deserialize, Serialize};
-use blueprint_sdk::std::fmt;
-use blueprint_sdk::std::path::PathBuf;
+
+pub use tangle_inference_core::{BillingConfig, GpuConfig, ServerConfig, TangleConfig};
 
 use crate::qos::QoSConfig;
 
 /// Top-level operator configuration.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OperatorConfig {
-    /// Tangle network configuration
+    /// Tangle network configuration (shared).
     pub tangle: TangleConfig,
 
-    /// Diffusion backend configuration
-    pub diffusion: DiffusionConfig,
+    /// Diffusion backend + per-image pricing configuration (image-gen-specific).
+    pub diffusion: ImageGenConfig,
 
-    /// HTTP server configuration
+    /// HTTP server configuration (shared).
     pub server: ServerConfig,
 
-    /// Billing / ShieldedCredits configuration
+    /// Billing / ShieldedCredits infrastructure configuration (shared).
     pub billing: BillingConfig,
 
-    /// GPU configuration
+    /// GPU configuration (shared).
     pub gpu: GpuConfig,
 
-    /// QoS heartbeat configuration (optional)
+    /// QoS heartbeat configuration (optional — disabled by default).
     #[serde(default)]
     pub qos: Option<QoSConfig>,
 }
 
-impl fmt::Debug for OperatorConfig {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("OperatorConfig")
-            .field("tangle", &self.tangle)
-            .field("diffusion", &self.diffusion)
-            .field("server", &self.server)
-            .field("billing", &self.billing)
-            .field("gpu", &self.gpu)
-            .finish()
-    }
-}
-
-#[derive(Clone, Serialize, Deserialize)]
-pub struct TangleConfig {
-    /// JSON-RPC endpoint for the Tangle EVM chain
-    pub rpc_url: String,
-
-    /// Chain ID
-    pub chain_id: u64,
-
-    /// Operator's private key (hex, without 0x prefix)
-    pub operator_key: String,
-
-    /// Tangle core contract address
-    pub tangle_core: String,
-
-    /// ShieldedCredits contract address
-    pub shielded_credits: String,
-
-    /// Blueprint ID this operator is registered for
-    pub blueprint_id: u64,
-
-    /// Service ID (set after service activation)
-    pub service_id: Option<u64>,
-}
-
-impl fmt::Debug for TangleConfig {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("TangleConfig")
-            .field("rpc_url", &self.rpc_url)
-            .field("chain_id", &self.chain_id)
-            .field("operator_key", &"[REDACTED]")
-            .field("tangle_core", &self.tangle_core)
-            .field("shielded_credits", &self.shielded_credits)
-            .field("blueprint_id", &self.blueprint_id)
-            .field("service_id", &self.service_id)
-            .finish()
-    }
-}
-
+/// Diffusion backend + pricing config. This is the only truly image-gen-specific
+/// config section — everything else comes from `tangle-inference-core`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DiffusionConfig {
-    /// Model identifier (e.g. "stabilityai/stable-diffusion-xl-base-1.0", "black-forest-labs/FLUX.1-dev")
+pub struct ImageGenConfig {
+    /// Model identifier (e.g. "stabilityai/stable-diffusion-xl-base-1.0",
+    /// "black-forest-labs/FLUX.1-dev").
     pub model: String,
 
     /// Diffusion backend endpoint (ComfyUI, A1111, or diffusers HTTP server).
@@ -87,131 +46,41 @@ pub struct DiffusionConfig {
     #[serde(default = "default_diffusion_endpoint")]
     pub endpoint: String,
 
-    /// Default number of inference steps
+    /// Default number of inference steps.
     #[serde(default = "default_steps")]
     pub default_steps: u32,
 
-    /// Default image width
+    /// Default image width.
     #[serde(default = "default_width")]
     pub default_width: u32,
 
-    /// Default image height
+    /// Default image height.
     #[serde(default = "default_height")]
     pub default_height: u32,
 
-    /// Supported output resolutions (WxH strings, e.g. "1024x1024")
+    /// Supported output resolutions (WxH strings, e.g. "1024x1024").
     #[serde(default = "default_supported_resolutions")]
     pub supported_resolutions: Vec<String>,
 
-    /// Request timeout for a single generation call (seconds)
+    /// Request timeout for a single generation call (seconds).
     #[serde(default = "default_generation_timeout")]
     pub generation_timeout_secs: u64,
 
-    /// Maximum images per request
+    /// Maximum images per request.
     #[serde(default = "default_max_images")]
     pub max_images: u32,
 
-    /// Operations this backend supports: "generate", "edit", "variation", "upscale"
+    /// Operations this backend supports: "generate", "edit", "variation", "upscale".
     #[serde(default = "default_supported_operations")]
     pub supported_operations: Vec<String>,
 
-    /// Maximum upload image size in bytes (for edit/variation endpoints)
+    /// Maximum upload image size in bytes (for edit/variation endpoints).
     #[serde(default = "default_max_image_size_bytes")]
     pub max_image_size_bytes: usize,
-}
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ServerConfig {
-    #[serde(default = "default_host")]
-    pub host: String,
-
-    #[serde(default = "default_port")]
-    pub port: u16,
-
-    #[serde(default = "default_max_concurrent")]
-    pub max_concurrent_requests: usize,
-
-    /// Maximum request body size in bytes (default 2 MiB)
-    #[serde(default = "default_max_request_body_bytes")]
-    pub max_request_body_bytes: usize,
-
-    /// Per-request timeout in seconds
-    #[serde(default = "default_request_timeout_secs")]
-    pub request_timeout_secs: u64,
-
-    /// Maximum concurrent requests per credit account.
-    /// 0 = unlimited (default).
-    #[serde(default)]
-    pub max_per_account_requests: usize,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BillingConfig {
-    /// Whether billing is required for HTTP requests
-    #[serde(default = "default_billing_required")]
-    pub required: bool,
-
-    /// Price per image in tsUSD base units (6 decimals: 1 = 0.000001 tsUSD)
+    /// Flat per-image price in tsUSD base units (6 decimals: 1 = 0.000001 tsUSD).
     pub price_per_image: u64,
-
-    /// Price multiplier for higher resolutions (per megapixel above 1MP).
-    /// 0 = flat rate regardless of resolution.
-    #[serde(default)]
-    pub price_per_extra_megapixel: u64,
-
-    /// Maximum amount a single SpendAuth can authorize
-    pub max_spend_per_request: u64,
-
-    /// Minimum balance required in a credit account
-    pub min_credit_balance: u64,
-
-    /// Whether billing is required on every request
-    #[serde(default = "default_billing_required")]
-    pub billing_required: bool,
-
-    /// Minimum charge amount per request (gas cost protection)
-    #[serde(default)]
-    pub min_charge_amount: u64,
-
-    /// Maximum retries for claim_payment on-chain calls
-    #[serde(default = "default_claim_max_retries")]
-    pub claim_max_retries: u32,
-
-    /// Clock skew tolerance in seconds for SpendAuth expiry checks
-    #[serde(default = "default_clock_skew_tolerance")]
-    pub clock_skew_tolerance_secs: u64,
-
-    /// Maximum gas price in gwei (0 = no cap)
-    #[serde(default)]
-    pub max_gas_price_gwei: u64,
-
-    /// Path to persist used nonces across restarts
-    #[serde(default = "default_nonce_store_path")]
-    pub nonce_store_path: Option<PathBuf>,
-
-    /// ERC-20 token address for x402 payment
-    #[serde(default)]
-    pub payment_token_address: Option<String>,
 }
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GpuConfig {
-    /// Expected number of GPUs
-    pub expected_gpu_count: u32,
-
-    /// Minimum required VRAM per GPU in MiB
-    pub min_vram_mib: u32,
-
-    /// GPU model name for on-chain registration
-    #[serde(default)]
-    pub gpu_model: Option<String>,
-
-    /// GPU monitoring interval in seconds
-    #[serde(default = "default_monitor_interval")]
-    pub monitor_interval_secs: u64,
-}
-
-// Defaults
 
 fn default_diffusion_endpoint() -> String {
     "http://127.0.0.1:8188".to_string()
@@ -252,51 +121,11 @@ fn default_supported_operations() -> Vec<String> {
 }
 
 fn default_max_image_size_bytes() -> usize {
-    20 * 1024 * 1024 // 20 MiB
-}
-
-fn default_host() -> String {
-    "0.0.0.0".to_string()
-}
-
-fn default_port() -> u16 {
-    8080
-}
-
-fn default_max_concurrent() -> usize {
-    8
-}
-
-fn default_billing_required() -> bool {
-    true
-}
-
-fn default_monitor_interval() -> u64 {
-    30
-}
-
-fn default_max_request_body_bytes() -> usize {
-    2 * 1024 * 1024
-}
-
-fn default_request_timeout_secs() -> u64 {
-    300
-}
-
-fn default_claim_max_retries() -> u32 {
-    3
-}
-
-fn default_clock_skew_tolerance() -> u64 {
-    30
-}
-
-fn default_nonce_store_path() -> Option<PathBuf> {
-    Some(PathBuf::from("data/nonces.json"))
+    20 * 1024 * 1024
 }
 
 impl OperatorConfig {
-    /// Load config from file, env vars, and CLI overrides.
+    /// Load config from file + env vars.
     pub fn load(path: Option<&str>) -> anyhow::Result<Self> {
         let mut builder = config::Config::builder();
 
@@ -304,32 +133,21 @@ impl OperatorConfig {
             builder = builder.add_source(config::File::with_name(path));
         }
 
-        // Environment variables override file config.
-        // Prefix: IMGGEN_OP_ (e.g. IMGGEN_OP_TANGLE__RPC_URL)
+        // Env vars override file config. Prefix: IMGGEN_OP_
+        // (e.g. IMGGEN_OP_TANGLE__RPC_URL).
         builder = builder.add_source(
             config::Environment::with_prefix("IMGGEN_OP")
                 .separator("__")
                 .try_parsing(true),
         );
 
-        // Allow DIFFUSION_ENDPOINT env var to override diffusion.endpoint
+        // Allow DIFFUSION_ENDPOINT env var to override diffusion.endpoint.
         if let Ok(endpoint) = std::env::var("DIFFUSION_ENDPOINT") {
             builder = builder.set_override("diffusion.endpoint", endpoint)?;
         }
 
         let cfg = builder.build()?.try_deserialize::<Self>()?;
         Ok(cfg)
-    }
-
-    /// Calculate cost for a single image at a given resolution.
-    pub fn image_cost(&self, width: u32, height: u32) -> u64 {
-        let base = self.billing.price_per_image;
-        if self.billing.price_per_extra_megapixel == 0 {
-            return base;
-        }
-        let megapixels = (width as u64 * height as u64) as f64 / 1_000_000.0;
-        let extra_mp = (megapixels - 1.0).max(0.0);
-        base + (extra_mp * self.billing.price_per_extra_megapixel as f64) as u64
     }
 }
 
@@ -343,21 +161,20 @@ mod tests {
                 "rpc_url": "http://localhost:8545",
                 "chain_id": 31337,
                 "operator_key": "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
-                "tangle_core": "0x0000000000000000000000000000000000000001",
                 "shielded_credits": "0x0000000000000000000000000000000000000002",
                 "blueprint_id": 1,
                 "service_id": null
             },
             "diffusion": {
                 "model": "stabilityai/stable-diffusion-xl-base-1.0",
-                "endpoint": "http://127.0.0.1:8188"
+                "endpoint": "http://127.0.0.1:8188",
+                "price_per_image": 50000
             },
             "server": {
                 "host": "0.0.0.0",
                 "port": 8080
             },
             "billing": {
-                "price_per_image": 50000,
                 "max_spend_per_request": 1000000,
                 "min_credit_balance": 1000
             },
@@ -374,8 +191,9 @@ mod tests {
         assert_eq!(cfg.tangle.chain_id, 31337);
         assert_eq!(cfg.diffusion.model, "stabilityai/stable-diffusion-xl-base-1.0");
         assert_eq!(cfg.server.port, 8080);
-        assert_eq!(cfg.billing.price_per_image, 50000);
+        assert_eq!(cfg.diffusion.price_per_image, 50000);
         assert_eq!(cfg.gpu.expected_gpu_count, 1);
+        assert!(cfg.tangle.service_id.is_none());
     }
 
     #[test]
@@ -385,14 +203,14 @@ mod tests {
         assert_eq!(cfg.diffusion.default_width, 1024);
         assert_eq!(cfg.diffusion.default_height, 1024);
         assert_eq!(cfg.diffusion.max_images, 4);
-        assert_eq!(cfg.server.max_concurrent_requests, 8);
+        assert_eq!(cfg.server.max_concurrent_requests, 64);
+        assert_eq!(cfg.gpu.monitor_interval_secs, 30);
     }
 
     #[test]
-    fn test_image_cost_flat() {
-        let cfg: OperatorConfig = serde_json::from_str(example_config_json()).unwrap();
-        // price_per_extra_megapixel defaults to 0, so flat rate
-        assert_eq!(cfg.image_cost(1024, 1024), 50000);
-        assert_eq!(cfg.image_cost(512, 512), 50000);
+    fn test_missing_required_field_fails() {
+        let bad = r#"{"tangle": {"rpc_url": "http://localhost:8545"}}"#;
+        let result = serde_json::from_str::<OperatorConfig>(bad);
+        assert!(result.is_err());
     }
 }
