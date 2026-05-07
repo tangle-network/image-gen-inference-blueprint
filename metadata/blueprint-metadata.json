@@ -1,0 +1,203 @@
+{
+  "name": "Image Generation Blueprint",
+  "description": "Decentralized image generation on Tangle through Stable Diffusion, FLUX, SDXL, ComfyUI, or diffusers-backed operators.",
+  "author": "Tangle Network",
+  "category": "AI Inference",
+  "image": null,
+  "website": "https://tangle.tools",
+  "codeRepository": "https://github.com/tangle-network/image-gen-inference-blueprint",
+  "docs": "https://github.com/tangle-network/image-gen-inference-blueprint#readme",
+  "integrity": null,
+  "blueprintUi": {
+    "displayName": "Image Generation",
+    "description": "Provision image-generation operators, submit prompt jobs, and monitor resolution pricing, GPU readiness, and generation history.",
+    "requestedSlug": "image-generation",
+    "publisher": {
+      "name": "Tangle Network",
+      "namespace": "tangle",
+      "verified": false
+    },
+    "resources": {
+      "serviceLabel": "Image service",
+      "itemLabel": "Image job",
+      "itemRoute": "runs"
+    },
+    "surfaces": [
+      "generic-overview",
+      "service-explorer",
+      "service-console",
+      "actions-panel",
+      "resources",
+      "metrics"
+    ],
+    "theme": {
+      "badgeLabel": "Diffusion generation",
+      "accentColor": "#D97706",
+      "secondaryColor": "#451A03",
+      "icon": "spark"
+    },
+    "overviewCards": [
+      {
+        "id": "openai-compatible-api",
+        "kind": "callout",
+        "title": "OpenAI Images API compatible",
+        "description": "Drop-in replacement for /v1/images/* endpoints. Supports generations, edits (img2img), and variations with configurable model backends.",
+        "tone": "success"
+      },
+      {
+        "id": "flexible-backends",
+        "kind": "checklist",
+        "title": "Multi-backend support",
+        "items": [
+          "ComfyUI (no-code node graphs)",
+          "Automatic1111 (WebUI)",
+          "Diffusers (local transformers)",
+          "TEE attestation (confidential VMs)"
+        ],
+        "tone": "info"
+      },
+      {
+        "id": "resolution-pricing",
+        "kind": "stat",
+        "title": "Resolution-aware pricing",
+        "description": "Base per-image cost plus optional per-megapixel surcharge for high-resolution outputs configured on-chain.",
+        "value": "dynamic",
+        "tone": "neutral"
+      }
+    ],
+    "actions": [
+      {
+        "id": "create-image",
+        "label": "Generate image",
+        "description": "Submit a prompt with optional negative prompt, resolution, and diffusion parameters for image synthesis.",
+        "target": "service",
+        "submitLabel": "Generate",
+        "fields": [
+          {
+            "key": "prompt",
+            "label": "Prompt",
+            "input": "textarea",
+            "required": true,
+            "placeholder": "A decentralized GPU operator dashboard with blue accent lighting"
+          },
+          {
+            "key": "size",
+            "label": "Resolution",
+            "input": "select",
+            "required": true,
+            "options": [
+              {
+                "label": "1024x1024",
+                "value": "1024x1024"
+              },
+              {
+                "label": "1024x1792 (portrait)",
+                "value": "1024x1792"
+              },
+              {
+                "label": "1792x1024 (landscape)",
+                "value": "1792x1024"
+              }
+            ]
+          },
+          {
+            "key": "n_images",
+            "label": "Number of images",
+            "input": "number",
+            "required": false,
+            "placeholder": "1"
+          }
+        ]
+      },
+      {
+        "id": "provision-image-service",
+        "label": "Provision image service",
+        "description": "Register a new image-gen operator with model selection, GPU specs, diffusion endpoint, and per-image pricing.",
+        "target": "service",
+        "submitLabel": "Provision",
+        "fields": [
+          {
+            "key": "model_id",
+            "label": "Model ID",
+            "input": "text",
+            "required": true,
+            "placeholder": "black-forest-labs/FLUX.1-dev"
+          },
+          {
+            "key": "gpu_count",
+            "label": "GPU count",
+            "input": "number",
+            "required": true,
+            "placeholder": "1"
+          },
+          {
+            "key": "price_per_image",
+            "label": "Price per image",
+            "input": "number",
+            "required": true,
+            "placeholder": "1000000"
+          }
+        ]
+      }
+    ],
+    "resourceViews": [
+      {
+        "id": "image-jobs",
+        "title": "Image jobs",
+        "kind": "grid",
+        "target": "resource",
+        "defaultSort": "updated_at:desc",
+        "columns": [
+          {
+            "key": "job_id",
+            "label": "Job",
+            "emphasis": true
+          },
+          {
+            "key": "model",
+            "label": "Model"
+          },
+          {
+            "key": "size",
+            "label": "Size"
+          },
+          {
+            "key": "status",
+            "label": "Status"
+          }
+        ]
+      }
+    ],
+    "modules": [
+      {
+        "module": "metrics-overview",
+        "slot": "overview",
+        "metricKeys": [
+          "images_generated",
+          "gpu_utilization_percent",
+          "request_duration_ms"
+        ]
+      },
+      {
+        "module": "permissions-matrix",
+        "slot": "sidebar",
+        "eventKinds": [
+          "gpu_healthy",
+          "endpoint_reachable",
+          "heartbeat_sent",
+          "operator_registered"
+        ]
+      },
+      {
+        "module": "resource-events",
+        "slot": "resources",
+        "eventKinds": [
+          "image_requested",
+          "render_started",
+          "image_ready",
+          "billing_charged"
+        ]
+      }
+    ]
+  }
+}
