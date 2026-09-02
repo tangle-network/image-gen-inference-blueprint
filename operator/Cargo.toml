@@ -29,7 +29,7 @@ k256 = { workspace = true }
 base64 = { workspace = true }
 
 # Shared inference operator infrastructure (billing, metrics, health, server helpers)
-tangle-inference-core = { git = "https://github.com/tangle-network/tangle-inference-core", branch = "master" }
+tangle-inference-core = { git = "https://github.com/tangle-network/tangle-inference-core", rev = "c7e11063a2ba30c662c64356a73bd81d4a03a267", default-features = false, features = ["billing", "http", "metrics"] }
 
 # Web framework
 axum = { version = "0.7", features = ["json", "macros"] }
@@ -46,8 +46,8 @@ prometheus = { workspace = true }
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
-blueprint-sdk = { version = "0.2.0-alpha.9", features = ["testing", "tangle"] }
-blueprint-anvil-testing-utils = { git = "https://github.com/tangle-network/blueprint", branch = "main" }
+blueprint-sdk = { git = "https://github.com/tangle-network/blueprint", rev = "edf64b4f60df4f51fd27ce39ea754bcbc0b3fd54", package = "blueprint-sdk", features = ["testing", "tangle"] }
+blueprint-anvil-testing-utils = { git = "https://github.com/tangle-network/blueprint", rev = "edf64b4f60df4f51fd27ce39ea754bcbc0b3fd54", package = "blueprint-anvil-testing-utils" }
 wiremock = "0.6"
 alloy-primitives = "1"
 alloy-sol-types = "1"
