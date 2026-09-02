@@ -61,6 +61,7 @@ fn test_config(diffusion_port: u16) -> OperatorConfig {
             max_per_account_requests: 0,
         },
         billing: BillingConfig {
+            payment_rails: tangle_inference_core::PaymentRails::SHIELDED,
             billing_required: false,
             max_spend_per_request: 1_000_000,
             min_credit_balance: 1000,
@@ -70,6 +71,7 @@ fn test_config(diffusion_port: u16) -> OperatorConfig {
             max_gas_price_gwei: 0,
             nonce_store_path: None,
             payment_token_address: None,
+            direct_replay_store_path: None,
         },
         gpu: GpuConfig {
             expected_gpu_count: 0,
