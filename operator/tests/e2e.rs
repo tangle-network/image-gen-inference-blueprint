@@ -51,6 +51,7 @@ fn test_config(diffusion_port: u16) -> OperatorConfig {
             price_per_image: 50_000,
         },
         server: ServerConfig {
+            endpoint_key: None,
             host: "127.0.0.1".into(),
             port: 0, // overridden per-test
             max_concurrent_requests: 8,
