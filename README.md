@@ -58,6 +58,6 @@ DIFFUSION_ENDPOINT=http://localhost:7860 ./target/release/image-gen-operator
 - [Embedding Blueprint](https://github.com/tangle-network/embedding-inference-blueprint) — text embeddings
 - [Video Generation Blueprint](https://github.com/tangle-network/video-gen-inference-blueprint) — video generation
 
-## Release definitions
+## Releases
 
-`deploy/register-blueprint.sh` reads the prepared definition from this repository's latest GitHub Release. The release workflow packages the actual binary digest, SDK download manifest, and execution profile together. Set `BLUEPRINT_DEFINITION` to a prepared definition for a specific release. For a local Anvil proof only, set `BLUEPRINT_BINARY` to the built operator binary; registration hashes that file and requires a loopback RPC on chain 31337.
+[Release](.github/workflows/release.yml) runs cargo-dist using [dist-workspace.toml](dist-workspace.toml). Download the native archive and verify its published checksum; `dist-manifest.json` identifies its executables and target platform.
