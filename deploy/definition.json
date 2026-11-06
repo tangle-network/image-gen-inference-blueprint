@@ -8,54 +8,56 @@
     "license": "MIT OR Apache-2.0",
     "website": "https://tangle.tools",
     "code_repository": "https://github.com/tangle-network/image-gen-inference-blueprint",
-    "profiling_data": "{\"execution_profile\":{\"gpu\":{\"policy\":\"none\",\"min_count\":0,\"min_vram_gb\":0}}}"
+    "profiling_data": "{\"execution_profile\":{\"gpu\":{\"policy\":\"none\",\"min_count\":0,\"min_vram_gb\":0}}}",
+    "category": "AI/Inference"
   },
   "config": {
-    "membership": "Dynamic",
+    "membership": "dynamic",
     "min_operators": 1,
-    "max_operators": 0
+    "max_operators": 0,
+    "pricing": "event_driven"
   },
   "supported_memberships": [
-    "Dynamic",
-    "Fixed"
+    "dynamic",
+    "fixed"
   ],
   "jobs": [
     {
-      "name": "image-gen",
-      "params": [
-        "(string,uint32,uint32,uint32,uint32)"
-      ],
-      "result": [
-        "(string,uint32,uint32,uint32)"
-      ],
-      "verifier": "None"
+      "name": "image-gen"
     }
   ],
   "sources": [
     {
-      "kind": "Native",
-      "native": {
-        "fetcher": "Github",
-        "entrypoint": "./image-gen-operator",
-        "github": {
-          "owner": "tangle-network",
-          "repo": "image-gen-inference-blueprint",
-          "tag": "v0.1.0",
-          "binaries": [
-            {
-              "name": "image-gen-operator",
-              "arch": "amd64",
-              "os": "linux",
-              "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
-            }
-          ]
-        }
-      },
+      "kind": "native",
       "testing": {
         "cargo_package": "image-gen-inference",
         "cargo_bin": "image-gen-operator",
         "base_path": "."
-      }
+      },
+      "fetcher": "github",
+      "entrypoint": "./image-gen-operator",
+      "github": {
+        "owner": "tangle-network",
+        "repo": "image-gen-inference-blueprint",
+        "tag": "v0.1.0",
+        "binaries": [
+          {
+            "name": "image-gen-operator",
+            "arch": "amd64",
+            "os": "linux",
+            "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+          }
+        ]
+      },
+      "binaries": [
+        {
+          "name": "image-gen-operator",
+          "arch": "amd64",
+          "os": "linux",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ]
     }
-  ]
+  ],
+  "metadata_file": "definition.json"
 }

@@ -2,10 +2,10 @@
 pragma solidity ^0.8.26;
 
 /// Model rules for operator-provided image generation.
-import { InferenceBSMBase } from "tangle-inference-core/InferenceBSMBase.sol";
+import { BlueprintServiceManagerBase } from "tnt-core/BlueprintServiceManagerBase.sol";
 
-contract ImageGenBSM is InferenceBSMBase {
-    constructor(address registry) { _bindRegistrationCore(registry); }
+contract ImageGenBSM is BlueprintServiceManagerBase {
+    constructor(address registry) { _initializeBlueprintManager(registry, msg.sender); }
 
     struct OperatorCapabilities {
         string model;
