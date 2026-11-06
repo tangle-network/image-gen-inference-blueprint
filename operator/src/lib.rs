@@ -5,15 +5,15 @@ pub mod server;
 
 // Re-export shared infrastructure so downstream crates can
 // `use image_gen_inference::*`.
+pub use tangle_inference_core::billing;
+pub use tangle_inference_core::metrics;
+pub use tangle_inference_core::server::{
+    error_response, extract_x402_spend_auth, payment_required, settle_billing, validate_spend_auth,
+};
 pub use tangle_inference_core::{
     detect_gpus, parse_nvidia_smi_output, AppState, AppStateBuilder, BillingClient, CostModel,
     CostParams, GpuInfo, NonceStore, PerImageCostModel, RequestGuard, SpendAuthPayload,
 };
-pub use tangle_inference_core::server::{
-    error_response, extract_x402_spend_auth, payment_required, settle_billing, validate_spend_auth,
-};
-pub use tangle_inference_core::metrics;
-pub use tangle_inference_core::billing;
 
 use blueprint_sdk::std::sync::{Arc, OnceLock};
 use blueprint_sdk::std::time::Duration;
@@ -74,7 +74,9 @@ struct DiffusionEndpoint {
 #[allow(clippy::result_large_err)]
 fn register_diffusion_endpoint(config: &OperatorConfig) -> Result<(), RunnerError> {
     let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(config.diffusion.generation_timeout_secs))
+        .timeout(Duration::from_secs(
+            config.diffusion.generation_timeout_secs,
+        ))
         .build()
         .map_err(|e| RunnerError::Other(format!("failed to build HTTP client: {e}").into()))?;
     let endpoint = DiffusionEndpoint {
@@ -146,7 +148,10 @@ pub async fn generate_image_direct(
         .await
         .map_err(|e| RunnerError::Other(format!("diffusion response parse failed: {e}").into()))?;
 
-    let image_uri = result["image_uri"].as_str().unwrap_or("pending").to_string();
+    let image_uri = result["image_uri"]
+        .as_str()
+        .unwrap_or("pending")
+        .to_string();
     let num_images = result["images"]
         .as_array()
         .map(|a| a.len() as u32)

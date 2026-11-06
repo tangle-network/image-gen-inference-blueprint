@@ -31,12 +31,13 @@ use tangle_inference_core::server::{
     settle_billing,
 };
 use tangle_inference_core::{
-    detect_gpus, AppState, CostModel, CostParams, PerImageCostModel, RequestGuard,
-    SpendAuthPayload,
+    detect_gpus, AppState, CostModel, CostParams, PerImageCostModel, RequestGuard, SpendAuthPayload,
 };
 
 use crate::config::OperatorConfig;
-use crate::diffusion::{DiffusionBackend, EditParams, GenerateParams, GeneratedImage, VariationParams};
+use crate::diffusion::{
+    DiffusionBackend, EditParams, GenerateParams, GeneratedImage, VariationParams,
+};
 
 /// Backend attached to `AppState` via `AppStateBuilder::backend`. Handlers
 /// retrieve it via `state.backend::<ImageGenBackend>().unwrap()`.
@@ -316,7 +317,10 @@ async fn create_image(
     Json(mut req): Json<CreateImageRequest>,
 ) -> Response {
     let backend = backend_from(&state);
-    let model_name = req.model.clone().unwrap_or_else(|| backend.config.diffusion.model.clone());
+    let model_name = req
+        .model
+        .clone()
+        .unwrap_or_else(|| backend.config.diffusion.model.clone());
     let mut metrics_guard = RequestGuard::new(&model_name);
 
     let _permit = match acquire_permit(&state) {
@@ -416,7 +420,14 @@ async fn create_image(
     // Settle billing.
     if let Some(ref auth) = spend_auth {
         let actual_cost = backend.calculate_cost(n_actual);
-        if let Err(e) = settle_billing(&state.billing, auth, preauth.unwrap_or(0), actual_cost).await {
+        if let Err(e) = settle_billing(
+            &state.billing,
+            auth,
+            preauth.unwrap_or(0),
+            Some(actual_cost),
+        )
+        .await
+        {
             tracing::error!(error = %e, "on-chain settlement failed — manual recovery required");
         }
     }
@@ -430,7 +441,10 @@ async fn edit_image(
     Json(mut req): Json<EditImageRequest>,
 ) -> Response {
     let backend = backend_from(&state);
-    let model_name = req.model.clone().unwrap_or_else(|| backend.config.diffusion.model.clone());
+    let model_name = req
+        .model
+        .clone()
+        .unwrap_or_else(|| backend.config.diffusion.model.clone());
     let mut metrics_guard = RequestGuard::new(&model_name);
 
     let _permit = match acquire_permit(&state) {
@@ -501,7 +515,14 @@ async fn edit_image(
 
     if let Some(ref auth) = spend_auth {
         let actual_cost = backend.calculate_cost(n_actual);
-        if let Err(e) = settle_billing(&state.billing, auth, preauth.unwrap_or(0), actual_cost).await {
+        if let Err(e) = settle_billing(
+            &state.billing,
+            auth,
+            preauth.unwrap_or(0),
+            Some(actual_cost),
+        )
+        .await
+        {
             tracing::error!(error = %e, "on-chain settlement failed — manual recovery required");
         }
     }
@@ -515,7 +536,10 @@ async fn create_variation(
     Json(mut req): Json<CreateVariationRequest>,
 ) -> Response {
     let backend = backend_from(&state);
-    let model_name = req.model.clone().unwrap_or_else(|| backend.config.diffusion.model.clone());
+    let model_name = req
+        .model
+        .clone()
+        .unwrap_or_else(|| backend.config.diffusion.model.clone());
     let mut metrics_guard = RequestGuard::new(&model_name);
 
     let _permit = match acquire_permit(&state) {
@@ -574,7 +598,14 @@ async fn create_variation(
 
     if let Some(ref auth) = spend_auth {
         let actual_cost = backend.calculate_cost(n_actual);
-        if let Err(e) = settle_billing(&state.billing, auth, preauth.unwrap_or(0), actual_cost).await {
+        if let Err(e) = settle_billing(
+            &state.billing,
+            auth,
+            preauth.unwrap_or(0),
+            Some(actual_cost),
+        )
+        .await
+        {
             tracing::error!(error = %e, "on-chain settlement failed — manual recovery required");
         }
     }
