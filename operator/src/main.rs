@@ -27,7 +27,7 @@ fn registration_payload(config: &OperatorConfig) -> Vec<u8> {
 tangle_inference_core::run_operator!(
     OperatorConfig::load(None),
     registration_payload,
-    image_gen_inference::router(),
+    |_| image_gen_inference::router(),
     |config| ImageGenServer { config },
     qos
 );

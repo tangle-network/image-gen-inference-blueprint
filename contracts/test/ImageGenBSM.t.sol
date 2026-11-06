@@ -15,6 +15,7 @@ contract ImageGenBSMTest is Test {
     address public user = address(0x3333);
 
     function setUp() public {
+        vm.prank(owner);
         bsm = new ImageGenBSM(tangleCore);
         vm.prank(tangleCore);
         bsm.onBlueprintCreated(1, owner, tangleCore);
