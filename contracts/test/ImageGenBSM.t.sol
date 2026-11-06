@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
-import { Test } from "forge-std/Test.sol";
-import { ImageGenBSM } from "../src/ImageGenBSM.sol";
-import { BlueprintServiceManagerBase } from "tnt-core/BlueprintServiceManagerBase.sol";
+import {Test} from "forge-std/Test.sol";
+import {ImageGenBSM} from "../src/ImageGenBSM.sol";
+import {BlueprintServiceManagerBase} from "tnt-core/BlueprintServiceManagerBase.sol";
 
 contract ImageGenBSMTest is Test {
     ImageGenBSM public bsm;
@@ -15,7 +15,8 @@ contract ImageGenBSMTest is Test {
     address public user = address(0x3333);
 
     function setUp() public {
-        bsm = new ImageGenBSM();
+        bsm = new ImageGenBSM(tangleCore);
+        vm.prank(tangleCore);
         bsm.onBlueprintCreated(1, owner, tangleCore);
 
         vm.prank(owner);
@@ -32,6 +33,7 @@ contract ImageGenBSMTest is Test {
 
     function test_cannotReinitialize() public {
         vm.expectRevert(BlueprintServiceManagerBase.AlreadyInitialized.selector);
+        vm.prank(tangleCore);
         bsm.onBlueprintCreated(2, owner, tangleCore);
     }
 
@@ -58,13 +60,8 @@ contract ImageGenBSMTest is Test {
     // --- Operator Registration ---
 
     function test_registerOperator() public {
-        bytes memory regData = abi.encode(
-            "stable-diffusion-xl",
-            uint32(2),
-            uint32(48_000),
-            "NVIDIA A100",
-            "https://op1.example.com"
-        );
+        bytes memory regData =
+            abi.encode("stable-diffusion-xl", uint32(2), uint32(48_000), "NVIDIA A100", "https://op1.example.com");
 
         vm.prank(tangleCore);
         bsm.onRegister(operator1, regData);
@@ -77,13 +74,8 @@ contract ImageGenBSMTest is Test {
     }
 
     function test_registerOperator_unsupportedModel() public {
-        bytes memory regData = abi.encode(
-            "nonexistent-model",
-            uint32(1),
-            uint32(16_000),
-            "NVIDIA A100",
-            "https://op1.example.com"
-        );
+        bytes memory regData =
+            abi.encode("nonexistent-model", uint32(1), uint32(16_000), "NVIDIA A100", "https://op1.example.com");
 
         vm.prank(tangleCore);
         vm.expectRevert("Model not supported");
@@ -105,13 +97,8 @@ contract ImageGenBSMTest is Test {
     }
 
     function test_registerOperator_onlyTangle() public {
-        bytes memory regData = abi.encode(
-            "stable-diffusion-xl",
-            uint32(1),
-            uint32(16_000),
-            "NVIDIA A100",
-            "https://op1.example.com"
-        );
+        bytes memory regData =
+            abi.encode("stable-diffusion-xl", uint32(1), uint32(16_000), "NVIDIA A100", "https://op1.example.com");
 
         vm.prank(user);
         vm.expectRevert(
@@ -158,13 +145,8 @@ contract ImageGenBSMTest is Test {
     function test_multipleOperators() public {
         _registerOperator(operator1);
 
-        bytes memory regData2 = abi.encode(
-            "stable-diffusion-xl",
-            uint32(4),
-            uint32(80_000),
-            "NVIDIA H100",
-            "https://op2.example.com"
-        );
+        bytes memory regData2 =
+            abi.encode("stable-diffusion-xl", uint32(4), uint32(80_000), "NVIDIA H100", "https://op2.example.com");
         vm.prank(tangleCore);
         bsm.onRegister(operator2, regData2);
 
@@ -175,13 +157,8 @@ contract ImageGenBSMTest is Test {
     // --- Helpers ---
 
     function _registerOperator(address op) internal {
-        bytes memory regData = abi.encode(
-            "stable-diffusion-xl",
-            uint32(2),
-            uint32(48_000),
-            "NVIDIA A100",
-            "https://op1.example.com"
-        );
+        bytes memory regData =
+            abi.encode("stable-diffusion-xl", uint32(2), uint32(48_000), "NVIDIA A100", "https://op1.example.com");
         vm.prank(tangleCore);
         bsm.onRegister(op, regData);
     }

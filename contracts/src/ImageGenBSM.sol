@@ -1,18 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
-/// @title ImageGenBSM — Blueprint Service Manager for image generation
-/// @dev Fork of InferenceBSM with per-image pricing instead of per-token
-/// Operators register with GPU capabilities and serve image generation models
-/// (Stable Diffusion, FLUX, SDXL, etc.) via ComfyUI or diffusers endpoints.
-///
-/// Pricing: pricePerImage (flat rate per generation)
-/// Model validation: minGpuVramMib based on model requirements
-/// Registration: model, gpuCount, totalVramMib, gpuModel, endpoint
+/// Model rules for operator-provided image generation.
+import { InferenceBSMBase } from "tangle-inference-core/InferenceBSMBase.sol";
 
-import { BlueprintServiceManagerBase } from "tnt-core/BlueprintServiceManagerBase.sol";
+contract ImageGenBSM is InferenceBSMBase {
+    constructor(address registry) { _bindRegistrationCore(registry); }
 
-contract ImageGenBSM is BlueprintServiceManagerBase {
     struct OperatorCapabilities {
         string model;
         uint32 gpuCount;

@@ -6,7 +6,7 @@ import {ImageGenBSM} from "../src/ImageGenBSM.sol";
 
 contract Deploy is RegisterBlueprint {
     function _deployManager() internal override returns (address) {
-        return address(new ImageGenBSM());
+        return address(new ImageGenBSM(vm.envAddress("TANGLE_CORE")));
     }
 
     function _report(address manager, uint64 blueprintId) internal override {
