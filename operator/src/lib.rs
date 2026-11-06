@@ -166,7 +166,7 @@ pub async fn generate_image_direct(
 #[debug_job]
 pub async fn run_image_gen(
     TangleArg(request): TangleArg<ImageGenRequest>,
-) -> Result<TangleResult<ImageGenResult>, RunnerError> {
+) -> anyhow::Result<TangleResult<ImageGenResult>> {
     let result = generate_image_direct(&request).await?;
     Ok(TangleResult(result))
 }
