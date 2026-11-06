@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 pub use tangle_inference_core::{BillingConfig, GpuConfig, ServerConfig, TangleConfig};
 
-use crate::qos::QoSConfig;
+use tangle_inference_core::qos::QoSConfig;
 
 /// Top-level operator configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -136,7 +136,7 @@ impl OperatorConfig {
         // Env vars override file config. Prefix: IMGGEN_OP_
         // (e.g. IMGGEN_OP_TANGLE__RPC_URL).
         builder = builder.add_source(
-            config::Environment::with_prefix("IMGGEN_OP")
+            config::Environment::with_prefix("IMGGEN_OP").prefix_separator("_")
                 .separator("__")
                 .try_parsing(true),
         );

@@ -1,0 +1,61 @@
+{
+  "metadata_uri": "ipfs://",
+  "manager": "0x0000000000000000000000000000000000000000",
+  "metadata": {
+    "name": "image-gen-inference",
+    "description": "Image generation via an operator diffusion backend",
+    "author": "Tangle Network",
+    "license": "MIT OR Apache-2.0",
+    "website": "https://tangle.tools",
+    "code_repository": "https://github.com/tangle-network/image-gen-inference-blueprint",
+    "profiling_data": ""
+  },
+  "config": {
+    "membership": "Dynamic",
+    "min_operators": 1,
+    "max_operators": 0
+  },
+  "supported_memberships": [
+    "Dynamic",
+    "Fixed"
+  ],
+  "jobs": [
+    {
+      "name": "image-gen",
+      "params": [
+        "(string,uint32,uint32,uint32,uint32)"
+      ],
+      "result": [
+        "(string,uint32,uint32,uint32)"
+      ],
+      "verifier": "None"
+    }
+  ],
+  "sources": [
+    {
+      "kind": "Native",
+      "native": {
+        "fetcher": "Github",
+        "entrypoint": "./image-gen-operator",
+        "github": {
+          "owner": "tangle-network",
+          "repo": "image-gen-inference-blueprint",
+          "tag": "v0.1.0",
+          "binaries": [
+            {
+              "name": "image-gen-operator",
+              "arch": "amd64",
+              "os": "linux",
+              "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+            }
+          ]
+        }
+      },
+      "testing": {
+        "cargo_package": "image-gen-inference",
+        "cargo_bin": "image-gen-operator",
+        "base_path": "."
+      }
+    }
+  ]
+}
