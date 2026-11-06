@@ -1,8 +1,11 @@
 //! Full lifecycle test -- on-chain job through real handler + wiremock diffusion backend.
 
-use anyhow::{Result, ensure};
-use wiremock::{MockServer, Mock, ResponseTemplate, matchers::{method, path}};
+use anyhow::{ensure, Result};
 use image_gen_inference::ImageGenRequest;
+use wiremock::{
+    matchers::{method, path},
+    Mock, MockServer, ResponseTemplate,
+};
 
 #[tokio::test]
 async fn test_generate_image_direct_with_wiremock() -> Result<()> {
@@ -39,7 +42,11 @@ async fn test_generate_image_direct_with_wiremock() -> Result<()> {
                 "expected IPFS URI, got '{}'",
                 gen_result.imageUri
             );
-            ensure!(gen_result.numImages == 2, "expected 2 images, got {}", gen_result.numImages);
+            ensure!(
+                gen_result.numImages == 2,
+                "expected 2 images, got {}",
+                gen_result.numImages
+            );
             ensure!(gen_result.widthUsed == 1024, "wrong width");
             ensure!(gen_result.heightUsed == 1024, "wrong height");
         }

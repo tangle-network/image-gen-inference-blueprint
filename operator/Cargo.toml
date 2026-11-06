@@ -3,6 +3,7 @@ name = "image-gen-inference"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 
 [lib]
 name = "image_gen_inference"
@@ -29,7 +30,7 @@ k256 = { workspace = true }
 base64 = { workspace = true }
 
 # Shared inference operator infrastructure (billing, metrics, health, server helpers)
-tangle-inference-core = { git = "https://github.com/tangle-network/tangle-inference-core", rev = "c7e11063a2ba30c662c64356a73bd81d4a03a267", default-features = false, features = ["billing", "http", "metrics"] }
+tangle-inference-core = { git = "https://github.com/tangle-network/tangle-inference-core", rev = "55fa3b0d55bcf1544a0c6fc3f6487e0557dfc906", default-features = false, features = ["billing", "http", "metrics"] }
 
 # Web framework
 axum = { version = "0.7", features = ["json", "macros"] }

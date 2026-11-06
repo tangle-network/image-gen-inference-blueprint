@@ -13,6 +13,8 @@
 
 A Tangle Blueprint enabling operators to serve image generation models with anonymous payments through shielded credits. Operators run ComfyUI, A1111, or diffusers-based endpoints and register on-chain with GPU capabilities.
 
+The operator forwards jobs to the configured diffusion HTTP endpoint and runs on CPU. Configure GPU resources on that worker.
+
 **Dual payment paths:**
 - **On-chain jobs** via TangleProducer — verifiable results on Tangle
 - **x402 HTTP** — fast private image generation at `/v1/images/generations`
@@ -55,3 +57,18 @@ DIFFUSION_ENDPOINT=http://localhost:7860 ./target/release/image-gen-operator
 - [Voice Inference Blueprint](https://github.com/tangle-network/voice-inference-blueprint) — TTS/STT
 - [Embedding Blueprint](https://github.com/tangle-network/embedding-inference-blueprint) — text embeddings
 - [Video Generation Blueprint](https://github.com/tangle-network/video-gen-inference-blueprint) — video generation
+
+## Register a blueprint
+
+Deploy the manager with [Deploy.s.sol](contracts/script/Deploy.s.sol), `TANGLE_CORE`
+and a Foundry keystore. Set its returned manager address in
+[definition.json](deploy/definition.json), then follow the
+[cargo-tangle deployment guide](https://github.com/tangle-network/blueprint#deploying-to-testnetmainnet)
+using the same wallet address in the SDK keystore. Use verified native artifact
+metadata from [Release](.github/workflows/release.yml). The CLI owns registration
+encoding and metadata hashing; `cargo tangle blueprint deploy tangle --help`
+lists its settings, RPC and artifact options.
+
+## Releases
+
+[Release](.github/workflows/release.yml) runs cargo-dist using [dist-workspace.toml](dist-workspace.toml). Download the native archive and verify its published checksum; `dist-manifest.json` identifies its executables and target platform.

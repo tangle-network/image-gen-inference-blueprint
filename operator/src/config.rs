@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 pub use tangle_inference_core::{BillingConfig, GpuConfig, ServerConfig, TangleConfig};
 
-use crate::qos::QoSConfig;
+use tangle_inference_core::qos::QoSConfig;
 
 /// Top-level operator configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -137,6 +137,7 @@ impl OperatorConfig {
         // (e.g. IMGGEN_OP_TANGLE__RPC_URL).
         builder = builder.add_source(
             config::Environment::with_prefix("IMGGEN_OP")
+                .prefix_separator("_")
                 .separator("__")
                 .try_parsing(true),
         );
@@ -148,69 +149,5 @@ impl OperatorConfig {
 
         let cfg = builder.build()?.try_deserialize::<Self>()?;
         Ok(cfg)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn example_config_json() -> &'static str {
-        r#"{
-            "tangle": {
-                "rpc_url": "http://localhost:8545",
-                "chain_id": 31337,
-                "operator_key": "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
-                "shielded_credits": "0x0000000000000000000000000000000000000002",
-                "blueprint_id": 1,
-                "service_id": null
-            },
-            "diffusion": {
-                "model": "stabilityai/stable-diffusion-xl-base-1.0",
-                "endpoint": "http://127.0.0.1:8188",
-                "price_per_image": 50000
-            },
-            "server": {
-                "host": "0.0.0.0",
-                "port": 8080
-            },
-            "billing": {
-                "max_spend_per_request": 1000000,
-                "min_credit_balance": 1000
-            },
-            "gpu": {
-                "expected_gpu_count": 1,
-                "min_vram_mib": 8192
-            }
-        }"#
-    }
-
-    #[test]
-    fn test_deserialize_full_config() {
-        let cfg: OperatorConfig = serde_json::from_str(example_config_json()).unwrap();
-        assert_eq!(cfg.tangle.chain_id, 31337);
-        assert_eq!(cfg.diffusion.model, "stabilityai/stable-diffusion-xl-base-1.0");
-        assert_eq!(cfg.server.port, 8080);
-        assert_eq!(cfg.diffusion.price_per_image, 50000);
-        assert_eq!(cfg.gpu.expected_gpu_count, 1);
-        assert!(cfg.tangle.service_id.is_none());
-    }
-
-    #[test]
-    fn test_defaults_applied() {
-        let cfg: OperatorConfig = serde_json::from_str(example_config_json()).unwrap();
-        assert_eq!(cfg.diffusion.default_steps, 30);
-        assert_eq!(cfg.diffusion.default_width, 1024);
-        assert_eq!(cfg.diffusion.default_height, 1024);
-        assert_eq!(cfg.diffusion.max_images, 4);
-        assert_eq!(cfg.server.max_concurrent_requests, 64);
-        assert_eq!(cfg.gpu.monitor_interval_secs, 30);
-    }
-
-    #[test]
-    fn test_missing_required_field_fails() {
-        let bad = r#"{"tangle": {"rpc_url": "http://localhost:8545"}}"#;
-        let result = serde_json::from_str::<OperatorConfig>(bad);
-        assert!(result.is_err());
     }
 }

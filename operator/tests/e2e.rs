@@ -31,8 +31,7 @@ fn test_config(diffusion_port: u16) -> OperatorConfig {
         tangle: TangleConfig {
             rpc_url: "http://localhost:8545".into(),
             chain_id: 31337,
-            operator_key: "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
-                .into(),
+            operator_key: "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80".into(),
             shielded_credits: "0x0000000000000000000000000000000000000000".into(),
             blueprint_id: 1,
             service_id: Some(1),
@@ -51,6 +50,7 @@ fn test_config(diffusion_port: u16) -> OperatorConfig {
             price_per_image: 50_000,
         },
         server: ServerConfig {
+            endpoint_key: None,
             host: "127.0.0.1".into(),
             port: 0, // overridden per-test
             max_concurrent_requests: 8,
@@ -104,7 +104,11 @@ async fn build_test_state(config: Arc<OperatorConfig>) -> image_gen_inference::A
 
 async fn start_test_server(
     diffusion_port: u16,
-) -> (u16, tokio::sync::watch::Sender<bool>, tokio::task::JoinHandle<()>) {
+) -> (
+    u16,
+    tokio::sync::watch::Sender<bool>,
+    tokio::task::JoinHandle<()>,
+) {
     let server_port = free_port();
     let mut config = test_config(diffusion_port);
     config.server.port = server_port;
@@ -298,7 +302,9 @@ async fn test_missing_spend_auth_returns_402_when_billing_required() {
 
     let client = reqwest::Client::new();
     let resp = client
-        .post(format!("http://127.0.0.1:{server_port}/v1/images/generations"))
+        .post(format!(
+            "http://127.0.0.1:{server_port}/v1/images/generations"
+        ))
         .json(&serde_json::json!({
             "prompt": "a cat",
             "size": "1024x1024",
