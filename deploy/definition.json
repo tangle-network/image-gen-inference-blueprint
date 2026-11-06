@@ -8,7 +8,7 @@
     "license": "MIT OR Apache-2.0",
     "website": "https://tangle.tools",
     "code_repository": "https://github.com/tangle-network/image-gen-inference-blueprint",
-    "profiling_data": ""
+    "profiling_data": "{\"execution_profile\":{\"gpu\":{\"policy\":\"none\",\"min_count\":0,\"min_vram_gb\":0}}}"
   },
   "config": {
     "membership": "Dynamic",

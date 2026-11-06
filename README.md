@@ -13,6 +13,8 @@
 
 A Tangle Blueprint enabling operators to serve image generation models with anonymous payments through shielded credits. Operators run ComfyUI, A1111, or diffusers-based endpoints and register on-chain with GPU capabilities.
 
+The operator forwards jobs to the configured diffusion HTTP endpoint and runs on CPU. Configure GPU resources on that worker.
+
 **Dual payment paths:**
 - **On-chain jobs** via TangleProducer — verifiable results on Tangle
 - **x402 HTTP** — fast private image generation at `/v1/images/generations`
@@ -55,3 +57,7 @@ DIFFUSION_ENDPOINT=http://localhost:7860 ./target/release/image-gen-operator
 - [Voice Inference Blueprint](https://github.com/tangle-network/voice-inference-blueprint) — TTS/STT
 - [Embedding Blueprint](https://github.com/tangle-network/embedding-inference-blueprint) — text embeddings
 - [Video Generation Blueprint](https://github.com/tangle-network/video-gen-inference-blueprint) — video generation
+
+## Release definitions
+
+`deploy/register-blueprint.sh` reads the prepared definition from this repository's latest GitHub Release. The release workflow packages the actual binary digest, SDK download manifest, and execution profile together. Set `BLUEPRINT_DEFINITION` to a prepared definition for a specific release. For a local Anvil proof only, set `BLUEPRINT_BINARY` to the built operator binary; registration hashes that file and requires a loopback RPC on chain 31337.
