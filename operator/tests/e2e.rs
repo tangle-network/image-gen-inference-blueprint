@@ -110,19 +110,20 @@ async fn start_test_server(
     tokio::sync::watch::Sender<bool>,
     tokio::task::JoinHandle<()>,
 ) {
-    let server_port = free_port();
-    let mut config = test_config(diffusion_port);
-    config.server.port = server_port;
-    let config = Arc::new(config);
-
-    let state = build_test_state(config).await;
-
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
-    let handle = image_gen_inference::server::start(state, shutdown_rx)
-        .await
-        .unwrap();
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    (server_port, shutdown_tx, handle)
+    // free_port releases its port before the server binds, so a parallel test can take it.
+    for _ in 0..5 {
+        let mut config = test_config(diffusion_port);
+        config.server.port = free_port();
+        let server_port = config.server.port;
+        let state = build_test_state(Arc::new(config)).await;
+        let started = image_gen_inference::server::start(state, shutdown_rx.clone()).await;
+        if let Ok(handle) = started {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            return (server_port, shutdown_tx, handle);
+        }
+    }
+    panic!("test server found no free port in 5 attempts");
 }
 
 // -- Tests --
