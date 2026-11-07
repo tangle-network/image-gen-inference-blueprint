@@ -8,9 +8,13 @@ contract Deploy is Script {
     function run() external {
         address registry = vm.envAddress("TANGLE_CORE");
         require(registry.code.length != 0, "TANGLE_CORE has no code");
+        // Without a configured model every operator registration reverts; a zero price would serve images for free.
+        uint256 price = vm.envUint("PRICE_PER_IMAGE");
+        require(price > 0, "PRICE_PER_IMAGE must be positive");
         vm.startBroadcast();
-        address manager = address(new ImageGenBSM(registry));
+        ImageGenBSM manager = new ImageGenBSM(registry);
+        manager.configureModel(vm.envString("MODEL"), uint64(price), uint32(vm.envUint("MIN_GPU_VRAM_MIB")));
         vm.stopBroadcast();
-        console2.log("DEPLOY_IMAGE_GEN_BSM=%s", vm.toString(manager));
+        console2.log("DEPLOY_MANAGER=%s", vm.toString(address(manager)));
     }
 }
