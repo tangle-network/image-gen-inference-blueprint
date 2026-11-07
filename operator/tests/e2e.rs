@@ -111,10 +111,32 @@ async fn start_test_server(
     tokio::sync::watch::Sender<bool>,
     tokio::task::JoinHandle<()>,
 ) {
+    launch(diffusion_port, false).await
+}
+
+async fn start_paid_server(
+    diffusion_port: u16,
+) -> (
+    u16,
+    tokio::sync::watch::Sender<bool>,
+    tokio::task::JoinHandle<()>,
+) {
+    launch(diffusion_port, true).await
+}
+
+async fn launch(
+    diffusion_port: u16,
+    billing_required: bool,
+) -> (
+    u16,
+    tokio::sync::watch::Sender<bool>,
+    tokio::task::JoinHandle<()>,
+) {
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
     // free_port releases its port before the server binds, so a parallel test can take it.
     for _ in 0..5 {
         let mut config = test_config(diffusion_port);
+        config.billing.billing_required = billing_required;
         config.server.port = free_port();
         let server_port = config.server.port;
         let state = build_test_state(Arc::new(config)).await;
@@ -290,18 +312,8 @@ async fn test_missing_spend_auth_returns_402_when_billing_required() {
         .mount(&mock_backend)
         .await;
 
-    // Build with billing_required = true.
-    let server_port = free_port();
-    let mut config = test_config(mock_backend.address().port());
-    config.server.port = server_port;
-    config.billing.billing_required = true;
-    let config = Arc::new(config);
-    let state = build_test_state(config).await;
-    let (_shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
-    let _handle = image_gen_inference::server::start(state, shutdown_rx)
-        .await
-        .unwrap();
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    let (server_port, _shutdown_tx, _handle) =
+        start_paid_server(mock_backend.address().port()).await;
 
     let client = reqwest::Client::new();
     let resp = client

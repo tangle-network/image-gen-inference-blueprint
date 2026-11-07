@@ -96,7 +96,6 @@ fn backend_from(state: &AppState) -> &ImageGenBackend {
         .expect("AppState backend is ImageGenBackend (checked in server::start)")
 }
 
-/// Start the HTTP server with graceful shutdown support, returns a join handle.
 pub async fn start(
     state: AppState,
     mut shutdown_rx: tokio::sync::watch::Receiver<bool>,
@@ -124,7 +123,7 @@ pub async fn start(
         .layer(TimeoutLayer::new(request_timeout))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
-        .with_state(state);
+        .with_state(state.clone());
 
     let listener = tokio::net::TcpListener::bind(&bind).await?;
     tracing::info!(bind = %bind, "HTTP server listening");
@@ -140,6 +139,7 @@ pub async fn start(
         {
             tracing::error!(error = %e, "HTTP server error");
         }
+        let _ = tokio::time::timeout(Duration::from_secs(60), state.drain_settlements()).await;
     });
 
     Ok(handle)
