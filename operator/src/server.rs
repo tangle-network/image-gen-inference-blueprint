@@ -27,8 +27,8 @@ use tower_http::timeout::TimeoutLayer;
 use tower_http::trace::TraceLayer;
 
 use tangle_inference_core::server::{
-    acquire_permit, billing_gate, error_response, gpu_health_handler, metrics_handler,
-    settle_billing,
+    acquire_permit, authorize_request, error_response, gpu_health_handler, metrics_handler,
+    payment_required, resolve_payment_proof, settle_request, AuthorizedPayment,
 };
 use tangle_inference_core::{
     detect_gpus, AppState, CostModel, CostParams, PerImageCostModel, RequestGuard, SpendAuthPayload,
@@ -68,6 +68,26 @@ impl ImageGenBackend {
             ..Default::default()
         })
     }
+}
+
+/// Authorize the request's payment; `None` serves it unpaid when billing is optional.
+async fn authorize(
+    state: &AppState,
+    headers: &HeaderMap,
+    body_spend_auth: Option<SpendAuthPayload>,
+    estimated: u64,
+) -> Result<Option<AuthorizedPayment>, Response> {
+    let Some(proof) = resolve_payment_proof(headers, body_spend_auth, None) else {
+        let (b, t) = (&state.billing_config, &state.tangle_config);
+        if b.billing_required {
+            let amount = estimated.max(b.min_charge_amount);
+            return Err(payment_required(b, t, state.operator_address, amount));
+        }
+        return Ok(None);
+    };
+    let healthy = backend_from(state).diffusion.is_healthy();
+    let authorized = authorize_request(state, proof, estimated, healthy).await?;
+    Ok(Some(authorized))
 }
 
 fn backend_from(state: &AppState) -> &ImageGenBackend {
@@ -372,21 +392,11 @@ async fn create_image(
 
     // Billing gate: extract x402 -> validate -> authorize on-chain.
     let estimated_cost = backend.calculate_cost(n);
-    let (spend_auth, preauth) =
-        match billing_gate(&state, &headers, req.spend_auth.take(), estimated_cost).await {
-            Ok(v) => v,
-            Err(resp) => return resp,
-        };
-
-    // Check backend health before serving (only when billing).
-    if spend_auth.is_some() && !backend.diffusion.is_healthy().await {
-        return error_response(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "diffusion backend is unavailable — billing not initiated".to_string(),
-            "upstream_error",
-            "backend_unhealthy",
-        );
-    }
+    let spend_auth = req.spend_auth.take();
+    let authorized = match authorize(&state, &headers, spend_auth, estimated_cost).await {
+        Ok(a) => a,
+        Err(resp) => return resp,
+    };
 
     // Generate.
     let params = GenerateParams {
@@ -418,18 +428,9 @@ async fn create_image(
     metrics_guard.set_success();
 
     // Settle billing.
-    if let Some(ref auth) = spend_auth {
+    if let Some(auth) = &authorized {
         let actual_cost = backend.calculate_cost(n_actual);
-        if let Err(e) = settle_billing(
-            &state.billing,
-            auth,
-            preauth.unwrap_or(0),
-            Some(actual_cost),
-        )
-        .await
-        {
-            tracing::error!(error = %e, "on-chain settlement failed — manual recovery required");
-        }
+        settle_request(&state, auth, Some(actual_cost)).await;
     }
 
     build_image_response(result.images, &req.response_format)
@@ -468,20 +469,11 @@ async fn edit_image(
     let n = req.n.clamp(1, backend.config.diffusion.max_images);
 
     let estimated_cost = backend.calculate_cost(n);
-    let (spend_auth, preauth) =
-        match billing_gate(&state, &headers, req.spend_auth.take(), estimated_cost).await {
-            Ok(v) => v,
-            Err(resp) => return resp,
-        };
-
-    if spend_auth.is_some() && !backend.diffusion.is_healthy().await {
-        return error_response(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "diffusion backend is unavailable — billing not initiated".to_string(),
-            "upstream_error",
-            "backend_unhealthy",
-        );
-    }
+    let spend_auth = req.spend_auth.take();
+    let authorized = match authorize(&state, &headers, spend_auth, estimated_cost).await {
+        Ok(a) => a,
+        Err(resp) => return resp,
+    };
 
     let params = EditParams {
         prompt: req.prompt.clone(),
@@ -513,18 +505,9 @@ async fn edit_image(
     let n_actual = result.images.len() as u32;
     metrics_guard.set_success();
 
-    if let Some(ref auth) = spend_auth {
+    if let Some(auth) = &authorized {
         let actual_cost = backend.calculate_cost(n_actual);
-        if let Err(e) = settle_billing(
-            &state.billing,
-            auth,
-            preauth.unwrap_or(0),
-            Some(actual_cost),
-        )
-        .await
-        {
-            tracing::error!(error = %e, "on-chain settlement failed — manual recovery required");
-        }
+        settle_request(&state, auth, Some(actual_cost)).await;
     }
 
     build_image_response(result.images, &req.response_format)
@@ -558,20 +541,11 @@ async fn create_variation(
     let n = req.n.clamp(1, backend.config.diffusion.max_images);
 
     let estimated_cost = backend.calculate_cost(n);
-    let (spend_auth, preauth) =
-        match billing_gate(&state, &headers, req.spend_auth.take(), estimated_cost).await {
-            Ok(v) => v,
-            Err(resp) => return resp,
-        };
-
-    if spend_auth.is_some() && !backend.diffusion.is_healthy().await {
-        return error_response(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "diffusion backend is unavailable — billing not initiated".to_string(),
-            "upstream_error",
-            "backend_unhealthy",
-        );
-    }
+    let spend_auth = req.spend_auth.take();
+    let authorized = match authorize(&state, &headers, spend_auth, estimated_cost).await {
+        Ok(a) => a,
+        Err(resp) => return resp,
+    };
 
     let params = VariationParams {
         model: req.model,
@@ -596,18 +570,9 @@ async fn create_variation(
     let n_actual = result.images.len() as u32;
     metrics_guard.set_success();
 
-    if let Some(ref auth) = spend_auth {
+    if let Some(auth) = &authorized {
         let actual_cost = backend.calculate_cost(n_actual);
-        if let Err(e) = settle_billing(
-            &state.billing,
-            auth,
-            preauth.unwrap_or(0),
-            Some(actual_cost),
-        )
-        .await
-        {
-            tracing::error!(error = %e, "on-chain settlement failed — manual recovery required");
-        }
+        settle_request(&state, auth, Some(actual_cost)).await;
     }
 
     build_image_response(result.images, &req.response_format)
